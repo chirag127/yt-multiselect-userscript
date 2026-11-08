@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.0.0
+// @version      2.0.1
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -71,9 +71,15 @@
     const m = (href || "").match(/[?&]v=([A-Za-z0-9_-]{11})/) || (href || "").match(/\/shorts\/([A-Za-z0-9_-]{11})/);
     return m ? m[1] : null;
   };
-  const thumbAnchors = () =>
-    [...document.querySelectorAll('a[href*="/watch?v="],a[href*="/shorts/"]')].filter((a) => a.querySelector("img") && idFromHref(a.href));
-  const cardOf = (a) => a.closest("ytd-video-renderer,ytd-rich-item-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,yt-lockup-view-model") || a.parentElement;
+  const CARD_SEL = "ytd-video-renderer,ytd-rich-item-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,ytd-playlist-panel-video-renderer,yt-lockup-view-model";
+  const cards = () => [...document.querySelectorAll(CARD_SEL)];
+  function cardVideoId(card) {
+    const a = card.querySelector('a#thumbnail[href],a[href*="/watch?v="],a[href*="/shorts/"]');
+    return a ? idFromHref(a.href) : null;
+  }
+  function cardThumb(card) {
+    return card.querySelector('a#thumbnail,ytd-thumbnail,yt-thumbnail-view-model,a[href*="/watch?v="],a[href*="/shorts/"]') || card;
+  }
 
   function paintCb(cb, on) {
     cb.textContent = on ? "✓" : "";
@@ -87,11 +93,12 @@
   }
   function injectCbs() {
     if (!active) return;
-    for (const a of thumbAnchors()) {
-      if (a.dataset.ytmsDone) continue;
-      const id = idFromHref(a.href); if (!id) continue;
-      a.dataset.ytmsDone = "1";
-      if (getComputedStyle(a).position === "static") a.style.position = "relative";
+    for (const card of cards()) {
+      if (card.dataset.ytmsDone) continue;
+      const id = cardVideoId(card); if (!id) continue;
+      card.dataset.ytmsDone = "1";
+      const host = cardThumb(card);
+      if (getComputedStyle(host).position === "static") host.style.position = "relative";
       const cb = document.createElement("div");
       cb.className = "ytms-cb"; cb.dataset.id = id;
       Object.assign(cb.style, { position: "absolute", top: "6px", left: "6px", zIndex: 50, width: "22px", height: "22px",
@@ -99,10 +106,10 @@
         color: "#fff", font: "600 13px Roboto, Arial", cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,.6)" });
       paintCb(cb, selected.has(id));
       cb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(id); }, true);
-      a.appendChild(cb);
+      host.appendChild(cb);
     }
   }
-  const loadedIds = () => [...new Set(thumbAnchors().map((a) => idFromHref(a.href)))];
+  const loadedIds = () => [...new Set(cards().map(cardVideoId).filter(Boolean))];
 
   function selectAll() { loadedIds().forEach((id) => selected.add(id)); refreshCbs(); updateBar(); }
   function deselectAll() { selected.clear(); refreshCbs(); updateBar(); }
@@ -114,7 +121,7 @@
       scrollTo(0, document.documentElement.scrollHeight);
       await new Promise((r) => setTimeout(r, 600));
       injectCbs();
-      const n = thumbAnchors().length; status && status("Loaded " + n + " videos…");
+      const n = cards().length; status && status("Loaded " + n + " videos…");
       if (n === last) stable++; else { stable = 0; last = n; }
     }
     scrollTo(0, 0); injectCbs();
@@ -203,7 +210,7 @@
     item("🔽", "Select with filter…", () => {
       const kw = (prompt("Select videos whose title/channel contains:") || "").trim().toLowerCase(); if (!kw) return;
       let n = 0;
-      thumbAnchors().forEach((a) => { const id = idFromHref(a.href); const txt = (cardOf(a).textContent || "").toLowerCase(); if (id && txt.includes(kw)) { selected.add(id); n++; } });
+      cards().forEach((card) => { const id = cardVideoId(card); const txt = (card.textContent || "").toLowerCase(); if (id && txt.includes(kw)) { selected.add(id); n++; } });
       refreshCbs(); updateBar(); status("✅ Selected " + n + " matching.");
     });
     item("📜", "Load entire page", () => loadEntirePage(status).then(() => status("✅ All loaded. " + loadedIds().length + " videos.")));
