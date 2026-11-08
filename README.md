@@ -14,3 +14,18 @@ Acts on **all** videos the page can return (follows API pagination), including S
 
 ## License
 [MIT](LICENSE) © 2026 chirag127
+<!-- okf-bundle -->
+## 🧠 Knowledge bundle (OKF)
+
+This repository ships its documentation as an
+**Open Knowledge Format** bundle in `okf/` —
+written so both a human and an AI agent can understand the script without reading the code.
+
+| File | Contents |
+|------|----------|
+| `okf/bundle.md` | Overview of the collection |
+| `okf/index.md` | Catalogue of concepts |
+| `okf/concepts/` | Shared knowledge (architecture, metadata, testing, DOM notes) |
+| `okf/scripts/` | This script's own note (where applicable) |
+
+Regenerate every repository's copy from the canonical bundle with `node okf/sync-okf.mjs`.
