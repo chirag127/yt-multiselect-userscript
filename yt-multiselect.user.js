@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.3.0
-// @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
+// @version      3.0.0
+// @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
 // @match        https://www.youtube.com/*
@@ -63,6 +63,49 @@
   const removeFrom = (pid, ids, p) => editPlaylist(pid, ids.map((id) => ({ action: "ACTION_REMOVE_VIDEO_BY_VIDEO_ID", removedVideoId: id })), p);
   const currentListId = () => new URLSearchParams(location.search).get("list");
 
+  // ---------- triage: channels and watched ----------
+  async function likeVideos(ids, on) {
+    let done = 0;
+    for (const id of ids) {
+      await IT.call(on ? "like/like" : "like/removelike", { target: { videoId: id } });
+      done++;
+      status((on ? "Liking " : "Unliking ") + done + "/" + ids.length);
+    }
+    return done;
+  }
+
+  const channelOf = (card) => {
+    const a = card.querySelector('a[href^="/@"],a[href^="/channel/"],a[href^="/c/"],a[href^="/user/"]');
+    const href = a ? a.getAttribute("href") : "";
+    const direct = href.match(/\/channel\/(UC[\w-]{22})/);
+    return direct ? direct[1] : null;
+  };
+  const subscribedChannels = () =>
+    cards().filter((c) => c.matches("ytd-channel-renderer") && /subscribed/i.test((c.querySelector("#subscribe-button,yt-subscribe-button-view-model") || {}).textContent || ""));
+
+  const watchedCards = () => cards().filter((c) => {
+    const bar = c.querySelector("#progress,ytd-thumbnail-overlay-resume-playback-renderer #progress,yt-thumbnail-overlay-progress-bar-view-model");
+    if (!bar) return false;
+    const w = parseFloat(bar.style.width || getComputedStyle(bar).width);
+    return Number.isFinite(w) && w >= 95;
+  });
+
+  /**
+   * The queue is a transient playlist whose id is `VL` + the video that started it. It only
+   * exists while something plays, so queueing needs a watch page or an already-open queue.
+   */
+  const queueId = () => {
+    const list = currentListId();
+    if (list && list.startsWith("VL")) return list;
+    const v = new URLSearchParams(location.search).get("v");
+    return v ? "VL" + v : null;
+  };
+  async function addToQueue(ids, p) {
+    const q = queueId();
+    if (!q) throw new Error("Open a video first - the queue does not exist yet.");
+    return addTo(q, ids, p);
+  }
+
   // ---------- selection state ----------
   const selected = new Set();
   let active = false;
@@ -87,9 +130,28 @@
     cb.style.background = on ? "#065fd4" : "rgba(0,0,0,.55)";
     cb.style.borderColor = on ? "#065fd4" : "#fff";
   }
-  function toggle(id) {
-    if (selected.has(id)) selected.delete(id); else selected.add(id);
-    document.querySelectorAll('.ytms-cb[data-id="' + id + '"]').forEach((cb) => paintCb(cb, selected.has(id)));
+  let anchorId = null;
+  function orderedIds() {
+    return cards().map(cardVideoId).filter(Boolean);
+  }
+  /**
+   * Toggle one video. With `range` (shift-click) it also applies the same state to every
+   * video between the last toggled card and this one, like a file manager.
+   */
+  function toggle(id, range) {
+    const on = !selected.has(id);
+    if (range && anchorId) {
+      const ids = orderedIds();
+      const a = ids.indexOf(anchorId), b = ids.indexOf(id);
+      if (a > -1 && b > -1) {
+        for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+          if (on) selected.add(ids[i]); else selected.delete(ids[i]);
+        }
+      }
+    }
+    if (on) selected.add(id); else selected.delete(id);
+    anchorId = id;
+    document.querySelectorAll(".ytms-cb").forEach((cb) => paintCb(cb, selected.has(cb.dataset.id)));
     updateBar();
   }
   function injectCbs() {
@@ -133,7 +195,7 @@
         pointerEvents: "auto"
       });
       paintCb(cb, selected.has(id));
-      cb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(id); }, true);
+      cb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(id, e.shiftKey); }, true);
       card.appendChild(cb);
     }
   }
@@ -255,6 +317,34 @@
       const n = await addTo(target, ids, (d, tt) => status("Adding " + d + "/" + tt));
       status("✅ Added " + n + " to " + target + ".");
     }));
+    item("👍", "Like selected", () => withSel(async (ids) => {
+      const n = await likeVideos(ids, true);
+      status("✅ Liked " + n + ".");
+    }));
+    item("👎", "Unlike selected", () => withSel(async (ids) => {
+      const n = await likeVideos(ids, false);
+      status("✅ Removed like from " + n + ".");
+    }));
+    item("🔕", "Unsubscribe visible channels", async () => {
+      const list = subscribedChannels();
+      const ids = list.map(channelOf).filter(Boolean);
+      if (!ids.length) return status("No subscribed channel cards on this page.");
+      if (settings.confirm && !confirm("Unsubscribe from " + ids.length + " channel(s)?")) return status("Cancelled.");
+      let done = 0;
+      for (const part of chunk(ids, 50)) {
+        await IT.call("subscription/unsubscribe", { channelIds: part });
+        done += part.length;
+        status("Unsubscribing " + done + "/" + ids.length);
+      }
+      list.forEach((c) => (c.style.opacity = ".35"));
+      status("✅ Unsubscribed " + done + ".");
+    });
+    item("🙈", "Hide watched cards", () => {
+      const list = watchedCards();
+      if (!list.length) return status("No watched cards on this page.");
+      list.forEach((c) => (c.style.display = "none"));
+      status("✅ Hid " + list.length + " watched card(s) on this page.");
+    });
     item("▶️", "Play all selected", () => withSel((ids) => open("https://www.youtube.com/watch_videos?video_ids=" + ids.join(","), "_blank")));
     if (currentListId()) item("🗑️", "Remove from this playlist", () => withSel(async (ids) => {
       if (settings.confirm && !confirm("Remove " + ids.length + " selected from this playlist?")) return status("Cancelled.");
