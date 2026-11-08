@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.0.3
+// @version      2.1.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -71,7 +71,7 @@
     const m = (href || "").match(/[?&]v=([A-Za-z0-9_-]{11})/) || (href || "").match(/\/shorts\/([A-Za-z0-9_-]{11})/);
     return m ? m[1] : null;
   };
-  const CARD_SEL = "ytd-video-renderer,ytd-rich-item-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,ytd-playlist-panel-video-renderer,yt-lockup-view-model";
+  const CARD_SEL = "ytd-video-renderer,ytd-rich-item-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,ytd-playlist-panel-video-renderer,yt-lockup-view-model,ytm-shorts-lockup-view-model,ytm-shorts-lockup-view-model-v2";
   const cards = () => [...document.querySelectorAll(CARD_SEL)];
   function cardVideoId(card) {
     const a = card.querySelector('a#thumbnail[href],a[href*="/watch?v="],a[href*="/shorts/"]');
@@ -117,9 +117,13 @@
 
   async function loadEntirePage(status) {
     let last = -1, stable = 0;
-    for (let i = 0; i < 150 && stable < 3; i++) {
+    for (let i = 0; i < 200 && stable < 4; i++) {
       scrollTo(0, document.documentElement.scrollHeight);
-      await new Promise((r) => setTimeout(r, 600));
+      // Expand shelves (Shorts etc.): click in-place "Show more" BUTTONS only (never <a>, which would navigate away).
+      document.querySelectorAll("button,tp-yt-paper-button,ytd-button-renderer,yt-button-shape button").forEach((b) => {
+        if (!b.dataset.ytmsSm && /^\s*show more\s*$/i.test(b.textContent || "")) { b.dataset.ytmsSm = "1"; try { b.click(); } catch (e) {} }
+      });
+      await new Promise((r) => setTimeout(r, 650));
       injectCbs();
       const n = cards().length; status && status("Loaded " + n + " videos…");
       if (n === last) stable++; else { stable = 0; last = n; }
