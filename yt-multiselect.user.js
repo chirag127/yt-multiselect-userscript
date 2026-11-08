@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.1.0
+// @version      2.2.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -98,15 +98,50 @@
       const id = cardVideoId(card); if (!id) continue;
       card.dataset.ytmsDone = "1";
       const host = cardThumb(card);
-      if (getComputedStyle(host).position === "static") host.style.position = "relative";
+      //
+      // Anchor the badge on an element that nothing below it can clip or cover.
+      //
+      // Shorts shelves broke the old version: the badge was absolutely
+      // positioned inside the thumbnail anchor, which sits in a horizontally
+      // scrolling row. The badge existed, measured 26px and reported
+      // "visible", yet was invisible because an ancestor clipped overflow or a
+      // sibling thumbnail layer painted over it.
+      //
+      // Fix: put it on the card itself (not the inner anchor), guarantee the
+      // card is a positioning context, and raise the stacking order above
+      // YouTube's thumbnail overlays. We also un-clip the nearest clipping
+      // ancestors between card and host.
+      //
+      if (getComputedStyle(card).position === "static") card.style.position = "relative";
+      unclipBetween(card, host);
+
       const cb = document.createElement("div");
       cb.className = "ytms-cb"; cb.dataset.id = id;
-      Object.assign(cb.style, { position: "absolute", top: "6px", left: "6px", zIndex: 50, width: "22px", height: "22px",
-        borderRadius: "50%", border: "2px solid #fff", display: "flex", alignItems: "center", justifyContent: "center",
-        color: "#fff", font: "600 13px Roboto, Arial", cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,.6)" });
+      Object.assign(cb.style, {
+        position: "absolute", top: "4px", left: "4px",
+        zIndex: 2147483647,
+        width: "22px", height: "22px",
+        borderRadius: "50%", border: "2px solid #fff",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color: "#fff", font: "600 13px Roboto, Arial",
+        cursor: "pointer",
+        boxShadow: "0 1px 4px rgba(0,0,0,.6)",
+        background: "rgba(0,0,0,.55)",
+        pointerEvents: "auto"
+      });
       paintCb(cb, selected.has(id));
       cb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(id); }, true);
-      host.appendChild(cb);
+      card.appendChild(cb);
+    }
+  }
+
+  /** Remove overflow clipping on ancestors between a card and its thumbnail. */
+  function unclipBetween(card, host) {
+    let node = host;
+    while (node && node !== card) {
+      const ov = getComputedStyle(node).overflow;
+      if (ov === "hidden" || ov === "clip") node.style.overflow = "visible";
+      node = node.parentElement;
     }
   }
   const loadedIds = () => [...new Set(cards().map(cardVideoId).filter(Boolean))];
