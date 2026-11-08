@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.0.2
+// @version      2.0.3
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -188,7 +188,8 @@
     menu.style.bottom = (innerHeight - r.top + 8) + "px";
     const item = (ic, label, fn) => {
       const d = document.createElement("div");
-      d.innerHTML = "<span style='display:inline-block;width:24px'>" + ic + "</span>" + label;
+      const sp = document.createElement("span"); sp.textContent = ic; sp.style.cssText = "display:inline-block;width:24px";
+      d.appendChild(sp); d.appendChild(document.createTextNode(label));
       Object.assign(d.style, { padding: "9px 12px", borderRadius: "6px", cursor: "pointer" });
       d.onmouseenter = () => (d.style.background = "#3f3f3f"); d.onmouseleave = () => (d.style.background = "transparent");
       d.onclick = () => { closeMenu(); fn(); }; menu.appendChild(d);
@@ -229,7 +230,7 @@
     ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
     const box = document.createElement("div");
     Object.assign(box.style, { background: "#181818", color: "#fff", padding: "20px", borderRadius: "12px", width: "340px", font: "14px Roboto, Arial" });
-    box.innerHTML = "<h3 style='margin:0 0 12px'>☑ Multiselect — Settings</h3>";
+    const h3 = document.createElement("h3"); h3.textContent = "☑ Multiselect — Settings"; h3.style.margin = "0 0 12px"; box.appendChild(h3);
     const posLabel = document.createElement("div"); posLabel.textContent = "Action bar position:"; posLabel.style.margin = "8px 0 4px"; box.appendChild(posLabel);
     ["bottom-center", "bottom-left"].forEach((p) => {
       const l = document.createElement("label"); l.style.display = "block"; l.style.cursor = "pointer";
@@ -240,16 +241,16 @@
     const cl = document.createElement("label"); cl.style.display = "block"; cl.style.margin = "10px 0"; cl.style.cursor = "pointer";
     const cc = document.createElement("input"); cc.type = "checkbox"; cc.checked = settings.confirm; cc.onchange = () => { settings.confirm = cc.checked; saveSettings(); };
     cl.appendChild(cc); cl.appendChild(document.createTextNode(" Confirm before destructive actions")); box.appendChild(cl);
-    const about = document.createElement("div"); about.style.marginTop = "14px"; about.style.lineHeight = "1.9";
-    about.innerHTML = "<b>About</b> — by chirag127<br>" +
-      link("❤️ Donate", LINKS.donate) + " · " + link("GitHub", LINKS.github) + "<br>" +
-      link("YouTube", LINKS.youtube) + " · " + link("X", LINKS.x) + " · " + link("LinkedIn", LINKS.linkedin) + "<br>" +
-      link("Instagram", LINKS.instagram) + " · " + link("Reddit", LINKS.reddit);
+    const about = document.createElement("div"); about.style.marginTop = "14px"; about.style.lineHeight = "2";
+    const ab = document.createElement("div"); ab.textContent = "About — by chirag127"; ab.style.fontWeight = "600"; about.appendChild(ab);
+    [["❤️ Donate", LINKS.donate], ["GitHub", LINKS.github], ["YouTube", LINKS.youtube], ["X", LINKS.x], ["LinkedIn", LINKS.linkedin], ["Instagram", LINKS.instagram], ["Reddit", LINKS.reddit]].forEach(([t, u], i) => {
+      if (i) about.appendChild(document.createTextNode(" · "));
+      const a = document.createElement("a"); a.href = u; a.target = "_blank"; a.textContent = t; a.style.color = "#3ea6ff"; a.style.textDecoration = "none"; about.appendChild(a);
+    });
     box.appendChild(about);
     const close = document.createElement("button"); close.textContent = "Close"; Object.assign(close.style, { marginTop: "14px", padding: "8px 14px", border: 0, borderRadius: "8px", background: "#065fd4", color: "#fff", cursor: "pointer" }); close.onclick = () => ov.remove();
     box.appendChild(close); ov.appendChild(box); document.body.appendChild(ov);
   }
-  const link = (t, u) => "<a href='" + u + "' target='_blank' style='color:#3ea6ff;text-decoration:none'>" + t + "</a>";
 
   // ---------- activate / toggle ----------
   function setActive(on) {
