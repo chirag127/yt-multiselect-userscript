@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.2.0
+// @version      2.3.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -72,6 +72,7 @@
     return m ? m[1] : null;
   };
   const CARD_SEL = "ytd-video-renderer,ytd-rich-item-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,ytd-playlist-panel-video-renderer,yt-lockup-view-model,ytm-shorts-lockup-view-model,ytm-shorts-lockup-view-model-v2";
+  const CARD_SELS = CARD_SEL.split(",");
   const cards = () => [...document.querySelectorAll(CARD_SEL)];
   function cardVideoId(card) {
     const a = card.querySelector('a#thumbnail[href],a[href*="/watch?v="],a[href*="/shorts/"]');
@@ -96,21 +97,23 @@
     for (const card of cards()) {
       if (card.dataset.ytmsDone) continue;
       const id = cardVideoId(card); if (!id) continue;
+      //
+      // Skip a card that contains another card of the same kind.
+      //
+      // Shorts are the reason this check exists: a Shorts shelf nests one
+      // `ytm-shorts-lockup-view-model` inside another, so both matched and both
+      // got a badge. Every Short ended up with 2-3 badges stacked at the same
+      // coordinates; the inner one painted last and stayed unticked, which
+      // looked exactly like "the tick never appears".
+      //
+      // One badge per outermost card only.
+      //
+      if (hasNestedCard(card)) continue;
       card.dataset.ytmsDone = "1";
       const host = cardThumb(card);
       //
-      // Anchor the badge on an element that nothing below it can clip or cover.
-      //
-      // Shorts shelves broke the old version: the badge was absolutely
-      // positioned inside the thumbnail anchor, which sits in a horizontally
-      // scrolling row. The badge existed, measured 26px and reported
-      // "visible", yet was invisible because an ancestor clipped overflow or a
-      // sibling thumbnail layer painted over it.
-      //
-      // Fix: put it on the card itself (not the inner anchor), guarantee the
-      // card is a positioning context, and raise the stacking order above
-      // YouTube's thumbnail overlays. We also un-clip the nearest clipping
-      // ancestors between card and host.
+      // Anchor the badge on the card itself, guarantee a positioning context,
+      // and raise stacking above YouTube's thumbnail overlays.
       //
       if (getComputedStyle(card).position === "static") card.style.position = "relative";
       unclipBetween(card, host);
@@ -133,6 +136,15 @@
       cb.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); toggle(id); }, true);
       card.appendChild(cb);
     }
+  }
+
+  /** True when `card` contains another card of the same kind (nested lockup). */
+  function hasNestedCard(card) {
+    for (const sel of CARD_SELS) {
+      if (!card.matches(sel)) continue;
+      if (card.querySelector(sel)) return true;
+    }
+    return false;
   }
 
   /** Remove overflow clipping on ancestors between a card and its thumbnail. */
