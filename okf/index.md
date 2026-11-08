@@ -15,6 +15,7 @@ the concepts below.
 
 | Concept | Note | One-line summary |
 |---------|------|------------------|
+| **OKF requirement** | **[concepts/okf-requirement.md](concepts/okf-requirement.md)** | **Every repository MUST ship an OKF bundle** |
 | Architecture | [concepts/architecture.md](concepts/architecture.md) | One repo per script, wired as a git submodule |
 | Userscript metadata | [concepts/userscript-metadata.md](concepts/userscript-metadata.md) | The `==UserScript==` block and auto-update |
 | ScriptCat & sctl | [concepts/scriptcat-and-sctl.md](concepts/scriptcat-and-sctl.md) | Manager choice and CLI automation |
@@ -31,6 +32,10 @@ the concepts below.
 | `yt-hotkey-prev-userscript` | scripts/yt-hotkey-prev-userscript.md | Key `p`, v1.0.4 |
 | `yt-multiselect-userscript` | [scripts/yt-multiselect-userscript.md](scripts/yt-multiselect-userscript.md) | InnerTube API, v2.3.0 |
 | `greasyfork-plus-userscript` | scripts/greasyfork-plus-userscript.md | Read-only enhancer, v1.0.0 |
+| `engagement-automation` | scripts/engagement-automation.md | InnerTube engagement queue, v1.0.0 |
+| `account-multiplexing` | scripts/account-multiplexing.md | Cookie/storage identity switching, v1.0.0 |
+| `rate-limit-dance` | scripts/rate-limit-dance.md | fetch/XHR pacing layer, v1.0.0 |
+| `scriptcat-inventory` | scripts/scriptcat-inventory.md | Read-only install drift report, v1.0.0 |
 
 ## Supporting repos
 

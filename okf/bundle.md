@@ -21,6 +21,18 @@ every script.
 | `index.md` | Bundle entry point — the catalogue of every concept |
 | `concepts/` | Ideas that apply across the whole collection (architecture, rules, testing) |
 | `scripts/` | One concept note per userscript |
+| `sync-okf.mjs` | Copies this bundle into every repository as a scoped copy |
+
+## Keeping copies in sync
+
+The bundle lives here as the **canonical** copy. Every userscript repository also carries a
+scoped copy under its own `okf/` so it is self-describing when cloned alone. Never hand-edit a
+repository's copy:
+
+```bash
+node okf/sync-okf.mjs           # regenerate every repository's copy
+node okf/sync-okf.mjs --check   # report drift, change nothing
+```
 
 ## The collection at a glance
 
@@ -37,6 +49,9 @@ every script.
 
 ## Conventions
 
+- **Every repository MUST carry an OKF bundle.** See
+  [concepts/okf-requirement.md](concepts/okf-requirement.md) — a repo without `okf/` is
+  incomplete.
 - **One script = one repository = one submodule** under `repos/own/public/userscripts/`.
 - Every repo carries `README.md`, `AGENTS.md`, and an MIT `LICENSE`.
 - Every script sets `@updateURL` / `@downloadURL` to its own raw `main` URL, so it
