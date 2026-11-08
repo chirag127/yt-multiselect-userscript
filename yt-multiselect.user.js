@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      1.0.0
+// @version      1.1.0
 // @description  One button, any YouTube page (search, subscriptions, playlist, home): load ALL results (incl. Shorts) via the InnerTube API and bulk add-to-Watch-Later / add-to-playlist / remove / export — no per-video clicking, no scrolling.
 // @author       chirag127
 // @license      MIT
@@ -71,19 +71,43 @@
     const u = new URL(location.href), p = u.pathname, q = u.searchParams;
     if (q.get("list")) return { type: "playlist", id: q.get("list"), label: "Playlist " + q.get("list") };
     if (p === "/results") return { type: "search", query: q.get("search_query") || "", label: 'Search: "' + (q.get("search_query") || "") + '"' };
-    if (p === "/feed/subscriptions") return { type: "browse", id: "FEsubscriptions", label: "Subscriptions feed" };
+    if (p === "/feed/subscriptions") return { type: "browse", id: "FEsubscriptions", label: "Subscriptions" };
     if (p === "/feed/trending") return { type: "browse", id: "FEtrending", label: "Trending" };
+    if (p === "/feed/history") return { type: "browse", id: "FEhistory", label: "History" };
+    if (p === "/feed/library" || p === "/feed/you") return { type: "browse", id: "FElibrary", label: "Library" };
     if (p === "/" || p === "") return { type: "browse", id: "FEwhat_to_watch", label: "Home feed" };
-    return { type: "unknown", label: "This page isn't supported — open search, a playlist, or a feed" };
+    // Everything else (channels, /watch, hashtags, etc.): scrape the videos loaded in the DOM.
+    return { type: "dom", label: "This page (loaded videos)" };
+  }
+
+  // DOM fallback: works on ANY page by reading rendered video/Shorts links; auto-scrolls to load them all.
+  function domIds() {
+    const ids = new Set();
+    document.querySelectorAll('a[href*="/watch?v="],a[href*="/shorts/"]').forEach((a) => {
+      const m = a.href.match(/[?&]v=([A-Za-z0-9_-]{11})/) || a.href.match(/\/shorts\/([A-Za-z0-9_-]{11})/);
+      if (m) ids.add(m[1]);
+    });
+    return [...ids];
+  }
+  async function domScrapeAll(onProgress) {
+    let last = -1, stable = 0;
+    for (let i = 0; i < 120 && stable < 3; i++) {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      await new Promise((r) => setTimeout(r, 600));
+      const n = domIds().length;
+      onProgress && onProgress(n);
+      if (n === last) stable++; else { stable = 0; last = n; }
+    }
+    return domIds();
   }
 
   async function loadAll(onProgress) {
     const c = context();
+    if (c.type === "dom") return { ids: await domScrapeAll(onProgress), ctx: c };
     let ep, body;
     if (c.type === "playlist") { ep = "browse"; body = { browseId: "VL" + c.id }; }
     else if (c.type === "search") { ep = "search"; body = { query: c.query }; }
-    else if (c.type === "browse") { ep = "browse"; body = { browseId: c.id }; }
-    else return { ids: [], ctx: c };
+    else { ep = "browse"; body = { browseId: c.id }; }
     const ids = new Set();
     let resp = await IT.call(ep, body);
     for (let i = 0; i < MAX_PAGES; i++) {
@@ -93,7 +117,9 @@
       if (!tk) break;
       resp = await IT.call(ep, { continuation: tk });
     }
-    return { ids: [...ids], ctx: c };
+    let arr = [...ids];
+    if (!arr.length) arr = await domScrapeAll(onProgress); // fallback if the API shape changed
+    return { ids: arr, ctx: c };
   }
 
   const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
@@ -133,7 +159,6 @@
     try {
       setStatus("⏳ Loading all videos…");
       const { ids, ctx } = await loadAll((n) => setStatus("⏳ Loaded " + n + "…"));
-      if (ctx.type === "unknown") return setStatus("⚠️ " + ctx.label);
       if (!ids.length) return setStatus("No videos found here.");
       await fn(ids, ctx);
     } catch (e) { setStatus("⚠️ " + e.message); }
