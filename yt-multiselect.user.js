@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      2.0.1
+// @version      2.0.2
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, filter-select, export, copy, load entire page — powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -164,6 +164,7 @@
     bar.appendChild(countEl);
     bar.appendChild(icon("✓✓", "Select all loaded", selectAll));
     bar.appendChild(icon("✕✓", "Deselect all", deselectAll));
+    bar.appendChild(icon("📜", "Load entire page (scroll to load every video)", () => loadEntirePage(status).then(() => status("✅ Loaded " + loadedIds().length + " videos."))));
     bar.appendChild(icon("⋮", "More actions", toggleMenu));
     document.body.appendChild(bar);
     renderCount();
@@ -268,5 +269,13 @@
     document.body.appendChild(fab);
   }
   mountFab();
-  new MutationObserver(() => { mountFab(); if (active) injectCbs(); }).observe(document.documentElement, { childList: true, subtree: true });
+  // Debounced observer: coalesce bursts of DOM mutations into one pass per frame
+  // (running injectCbs on every mutation janked the page so scroll/clicks froze).
+  let scheduled = false;
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => { scheduled = false; mountFab(); if (active) injectCbs(); });
+  }
+  new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true });
 })();
