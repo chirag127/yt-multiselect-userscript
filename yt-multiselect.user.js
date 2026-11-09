@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      3.4.1
+// @version      3.5.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -121,10 +121,15 @@
   }
 
   const channelOf = (card) => {
-    const a = card.querySelector('a[href^="/@"],a[href^="/channel/"],a[href^="/c/"],a[href^="/user/"]');
-    const href = a ? a.getAttribute("href") : "";
-    const direct = href.match(/\/channel\/(UC[\w-]{22})/);
-    return direct ? direct[1] : null;
+    try {
+      const a = card.querySelector('a[href^="/channel/"]');
+      const direct = ((a && a.getAttribute("href")) || "").match(/^\/channel\/(UC[\w-]{22})(?:[/?#]|$)/);
+      if (direct) return direct[1];
+      // Handle links do not contain a UC id; use the row's renderer data instead.
+      const data = card.data || (card.__data && card.__data.data) || {};
+      const ids = [data.channelId, data.navigationEndpoint?.browseEndpoint?.browseId, findSubscribeButton(data)?.channelId];
+      return ids.find((id) => typeof id === "string" && /^UC[\w-]{22}$/.test(id)) || null;
+    } catch (e) { return null; }
   };
   const subscribedChannels = () =>
     cards().filter((c) => c.matches("ytd-channel-renderer") && /subscribed/i.test((c.querySelector("#subscribe-button,yt-subscribe-button-view-model") || {}).textContent || ""));
@@ -301,7 +306,8 @@
   };
   const CARD_SEL = "ytd-video-renderer,ytd-rich-item-renderer,ytd-grid-video-renderer,ytd-compact-video-renderer,ytd-playlist-video-renderer,ytd-reel-item-renderer,ytd-playlist-panel-video-renderer,yt-lockup-view-model,ytm-shorts-lockup-view-model,ytm-shorts-lockup-view-model-v2";
   const CARD_SELS = CARD_SEL.split(",");
-  const cards = () => [...document.querySelectorAll(CARD_SEL)];
+  const cards = () => [...document.querySelectorAll(CARD_SEL + (/^\/feed\/channels\/?$/.test(location.pathname) ? ",ytd-channel-renderer" : ""))];
+  const cardId = (card) => card.matches("ytd-channel-renderer") ? channelOf(card) : cardVideoId(card);
   function cardVideoId(card) {
     const a = card.querySelector('a#thumbnail[href],a[href*="/watch?v="],a[href*="/shorts/"]');
     return a ? idFromHref(a.href) : null;
@@ -317,7 +323,7 @@
   }
   let anchorId = null;
   function orderedIds() {
-    return cards().map(cardVideoId).filter(Boolean);
+    return cards().map(cardId).filter(Boolean);
   }
   /**
    * Toggle one video. With `range` (shift-click) it also applies the same state to every
@@ -343,7 +349,7 @@
     if (!active) return;
     for (const card of cards()) {
       if (card.dataset.ytmsDone) continue;
-      const id = cardVideoId(card); if (!id) continue;
+      const id = cardId(card); if (!id) continue;
       //
       // Skip a card that contains another card of the same kind.
       //
@@ -403,9 +409,34 @@
       node = node.parentElement;
     }
   }
-  const loadedIds = () => [...new Set(cards().map(cardVideoId).filter(Boolean))];
+  const loadedIds = () => [...new Set(cards().map(cardId).filter(Boolean))];
 
   function selectAll() { loadedIds().forEach((id) => selected.add(id)); refreshCbs(); updateBar(); }
+  const selectAllChannels = () => {
+    const ids = [...new Set(cards().filter((c) => c.matches("ytd-channel-renderer")).map(channelOf).filter(Boolean))];
+    ids.forEach((id) => selected.add(id));
+    refreshCbs(); updateBar();
+    status("✅ Selected " + ids.length + " channel(s).");
+  };
+  const changeChannelSubscriptions = async (on, selection) => {
+    const wanted = selection && new Set(selection);
+    const list = (wanted ? cards().filter((c) => c.matches("ytd-channel-renderer")) : subscribedChannels())
+      .map((card) => ({ card, id: channelOf(card) })).filter(({ id }) => id && (!wanted || wanted.has(id)));
+    const ids = [...new Set(list.map(({ id }) => id))];
+    if (!ids.length) return status(selection ? "No selected channel rows could be resolved." : "No subscribed channel cards on this page.");
+    if (settings.confirm && !confirm((on ? "Subscribe to " : "Unsubscribe from ") + ids.length + " channel(s)?")) return status("Cancelled.");
+    let done = 0;
+    try {
+      for (const part of chunk(ids, 50)) {
+        await IT.call(on ? "subscription/subscribe" : "subscription/unsubscribe", { channelIds: part });
+        done += part.length;
+        list.forEach(({ card, id }) => { if (part.includes(id)) card.style.opacity = on ? "" : ".35"; });
+        status((on ? "Subscribing " : "Unsubscribing ") + done + "/" + ids.length);
+        if (done < ids.length) await sleep(jitter(220));
+      }
+      status("✅ " + (on ? "Subscribed " : "Unsubscribed ") + done + ".");
+    } catch (e) { status("⚠️ Updated " + done + "/" + ids.length + " channel(s). " + e.message); }
+  };
   function deselectAll() { selected.clear(); refreshCbs(); updateBar(); }
   function refreshCbs() { document.querySelectorAll(".ytms-cb").forEach((cb) => paintCb(cb, selected.has(cb.dataset.id))); }
 
@@ -468,11 +499,12 @@
     renderCount();
   }
 
-  async function withSel(fn, needList) {
+  async function withSel(fn, needList, channels = false) {
     try {
-      if (!selected.size) return status("Select some videos first.");
+      const ids = [...selected].filter((id) => (channels ? /^UC[\w-]{22}$/ : /^[\w-]{11}$/).test(id));
+      if (!ids.length) return status(channels ? "Select some channels first." : "Select some videos first.");
       if (needList && !currentListId()) return status("Open a playlist to remove from it.");
-      await fn([...selected]);
+      await fn(ids);
     } catch (e) { status("⚠️ " + e.message); }
   }
   function closeMenu() { if (menu) { menu.remove(); menu = null; } }
@@ -544,20 +576,10 @@
       if (result.unresolved.length) summary.push(result.unresolved.length + " unresolved");
       status(summary.join(" · "));
     }));
-    item("🔕", "Unsubscribe visible channels", async () => {
-      const list = subscribedChannels();
-      const ids = list.map(channelOf).filter(Boolean);
-      if (!ids.length) return status("No subscribed channel cards on this page.");
-      if (settings.confirm && !confirm("Unsubscribe from " + ids.length + " channel(s)?")) return status("Cancelled.");
-      let done = 0;
-      for (const part of chunk(ids, 50)) {
-        await IT.call("subscription/unsubscribe", { channelIds: part });
-        done += part.length;
-        status("Unsubscribing " + done + "/" + ids.length);
-      }
-      list.forEach((c) => (c.style.opacity = ".35"));
-      status("✅ Unsubscribed " + done + ".");
-    });
+    item("✅", "Select all channels", selectAllChannels);
+    item("🔕", "Unsubscribe SELECTED channels", () => withSel((ids) => changeChannelSubscriptions(false, ids), false, true));
+    item("🔔", "Subscribe SELECTED channels", () => withSel((ids) => changeChannelSubscriptions(true, ids), false, true));
+    item("🔕", "Unsubscribe ALL visible channels (no selection)", () => changeChannelSubscriptions(false));
     item("🙈", "Hide watched cards", () => {
       const list = watchedCards();
       if (!list.length) return status("No watched cards on this page.");
@@ -572,7 +594,7 @@
     item("🔽", "Select with filter…", () => {
       const kw = (prompt("Select videos whose title/channel contains:") || "").trim().toLowerCase(); if (!kw) return;
       let n = 0;
-      cards().forEach((card) => { const id = cardVideoId(card); const txt = (card.textContent || "").toLowerCase(); if (id && txt.includes(kw)) { selected.add(id); n++; } });
+      cards().forEach((card) => { const id = cardId(card); const txt = (card.textContent || "").toLowerCase(); if (id && txt.includes(kw)) { selected.add(id); n++; } });
       refreshCbs(); updateBar(); status("✅ Selected " + n + " matching.");
     });
     item("🧹", "Select unavailable / duplicates", () => {
