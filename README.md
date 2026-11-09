@@ -12,6 +12,29 @@ Click **☑ Multiselect** (bottom-right) → pick an action (hover for titles):
 
 Acts on **all** videos the page can return (follows API pagination), including Shorts. Uses your signed-in session; touches only your own account.
 
+## Settings — in the script menu, never on the page
+
+There is **no settings overlay**. Open the ScriptCat popup (or the extension right-click menu), find
+*YouTube Multiselect (API)*, and use:
+
+| Entry | Effect |
+|---|---|
+| `Settings: action bar position…` | `bottom-center` or `bottom-right` (`bottom-left` is reserved for the YouTube Toolkit) |
+| `Confirm before destructive actions: ON/OFF` | Toggles the confirm prompt; label shows current state |
+| `Settings: show current setup` | Prints current settings |
+| `About & links` | Author links |
+
+Settings are stored via `GM_setValue`, so ScriptCat's cloud sync carries them across browsers.
+The previous full-screen modal was removed on purpose — it overlapped YouTube's UI and other
+scripts.
+
+## This script owns removal
+
+Bulk **removal** from a playlist lives here and nowhere else. `⋮ → Select unavailable / duplicates`
+marks dead and duplicate rows, then `⋮ → Remove from this playlist` deletes them.
+`yt-toolkit-userscript` detects the same rows but cannot delete them, so there is exactly one code
+path that removes videos.
+
 ## License
 [MIT](LICENSE) © 2026 chirag127
 

@@ -1,6 +1,29 @@
 # AGENTS.md — yt-multiselect-userscript
 
-Single-file userscript. `yt-multiselect.user.js` at repo root IS the product. No build, no deps, `@grant none`.
+Single-file userscript. `yt-multiselect.user.js` at repo root IS the product. No build, no deps.
+
+## Settings live in the context menu ONLY
+
+There is **no settings overlay, modal or floater**. Settings are `GM_registerMenuCommand` entries
+that open native `prompt`/`alert` dialogs; the previous full-screen modal (`openSettings()`) was
+deleted because it covered YouTube's UI and collided with other scripts.
+
+This is why the script now declares grants instead of `@grant none`:
+
+```
+@grant GM_getValue   @grant GM_setValue   @grant GM_registerMenuCommand
+```
+
+Settings are written to **both** `GM_setValue` (so ScriptCat cloud sync carries them across
+browsers) and `localStorage` (the pre-3.2.0 key `ytms`, kept as a migration fallback). Do not move
+them back to `localStorage` only — that breaks sync.
+
+## Removal is owned here
+
+Bulk playlist removal lives in this script and nowhere else. `⋮ → Select unavailable / duplicates`
+selects dead and duplicate rows; `⋮ → Remove from this playlist` deletes them.
+`yt-toolkit-userscript` used to duplicate that path and its removal code was deleted. If a new
+feature needs to delete videos, add it **here**.
 
 ## 🥇 Prime directive — always use the best method
 
@@ -68,7 +91,11 @@ YouTube **InnerTube API** (`youtubei/v1/*`) using the page's signed-in session (
   Status code alone is not evidence.
 
 ## Rules
-- One file, zero deps, `@grant none`. Bump `@version`; keep `@updateURL`/`@downloadURL` on raw `main`.
+- One file, zero deps. Bump `@version`; keep `@updateURL`/`@downloadURL` on raw `main`.
+- Grants are intentional: `GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`. Do not remove them —
+  the settings surface depends on the menu command.
+- The action bar is `bottom-center` / `bottom-right`. `bottom-left` belongs to `yt-toolkit-userscript`;
+  verify no overlap before moving it.
 - Act only on the signed-in user's own account. Confirm destructive ops.
 - Keep catching all video types in `collect()`: `*VideoRenderer.videoId`, `lockupViewModel.contentId` (new playlist items), `reelWatchEndpoint.videoId` (Shorts).
 
