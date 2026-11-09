@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      3.1.0
+// @version      3.1.1
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -110,6 +110,14 @@
   // Resolve a video id to { channelId, subscribed, name }. `next` is used rather
   // than `player` because it returns the subscribe state directly, saving a
   // second round trip per video.
+  //
+  // Caveat worth knowing: the `subscribed` flag in `next` is served from a
+  // server-side cache and can lag by minutes after a subscribe. It is therefore
+  // a *hint* for the confirmation summary, never a gate. Re-subscribing a
+  // channel that is already subscribed is idempotent on YouTube's side, so a
+  // stale false only costs one redundant request, while trusting a stale true
+  // would silently skip a channel the user asked for. The summary is worded to
+  // reflect this: it says what the script will *attempt*.
   async function channelForVideo(videoId) {
     if (channelCache.has(videoId)) return channelCache.get(videoId);
     let result = null;
@@ -153,55 +161,65 @@
   }
 
   /**
-   * Subscribe to the channels that own the selected videos.
+   * Subscribe to the channels that own the given videos, or to an already
+   * resolved channel list.
+   *
+   * Pass `videos` to resolve-then-subscribe. Pass `channels` to skip resolution
+   * entirely — which is what the menu does after the confirmation step, since
+   * re-resolving every video a second time would repeat a whole round of
+   * requests for information already in hand.
    *
    * Not every selected video belongs to a different channel, so channels are
    * de-duplicated first. Videos whose channel cannot be resolved are reported
    * rather than silently skipped.
    */
-  async function subscribeToChannelsOf(videoIds, { dryRun, progress }) {
-    const resolved = [];
-    const unresolved = [];
+  async function subscribeToChannels({ videos, channels, progress }) {
+    let all;
+    let unresolved = [];
 
-    let done = 0;
-    await runPool(videoIds, async (videoId) => {
-      const info = await channelForVideo(videoId);
-      progress && progress(++done, videoIds.length, "Resolving channels");
-      if (info && info.channelId) resolved.push(info);
-      else unresolved.push(videoId);
-    }, 3);
+    if (channels) {
+      all = channels;
+    } else {
+      const resolved = [];
+      let done = 0;
+      await runPool(videos, async (videoId) => {
+        const info = await channelForVideo(videoId);
+        progress && progress(++done, videos.length, "Resolving channels");
+        if (info && info.channelId) resolved.push(info);
+        else unresolved.push(videoId);
+      }, 3);
 
-    // De-duplicate by channel id, keeping the first sighting.
-    const byChannel = new Map();
-    for (const entry of resolved) {
-      if (!byChannel.has(entry.channelId)) byChannel.set(entry.channelId, entry);
+      // De-duplicate by channel id, keeping the first sighting.
+      const byChannel = new Map();
+      for (const entry of resolved) {
+        if (!byChannel.has(entry.channelId)) byChannel.set(entry.channelId, entry);
+      }
+      all = [...byChannel.values()];
     }
 
-    const all = [...byChannel.values()];
-    const toSubscribe = all.filter((entry) => !entry.subscribed);
+    // Subscribe to every resolved channel rather than only those the cached flag
+    // calls unsubscribed. The flag lags, so filtering on it risks silently
+    // skipping a channel the user selected; subscribing is idempotent, so the
+    // extra request is harmless. `already` is kept only to inform the summary.
     const already = all.filter((entry) => entry.subscribed);
-
-    if (dryRun) {
-      return { planned: toSubscribe, already, unresolved, subscribed: 0, failed: [] };
-    }
 
     const failed = [];
     let subscribed = 0;
 
-    for (let i = 0; i < toSubscribe.length; i += 1) {
-      const entry = toSubscribe[i];
+    for (let i = 0; i < all.length; i += 1) {
+      const entry = all[i];
       try {
         await IT.call("subscription/subscribe", { channelIds: [entry.channelId] });
         subscribed += 1;
       } catch (error) {
         failed.push({ channelId: entry.channelId, error: String(error && error.message ? error.message : error) });
       }
-      progress && progress(i + 1, toSubscribe.length, "Subscribing");
+      progress && progress(i + 1, all.length, "Subscribing");
       // Pace writes; a burst of identical-timing requests is a rate-limit risk.
-      if (i < toSubscribe.length - 1) await sleep(jitter(220));
+      if (i < all.length - 1) await sleep(jitter(220));
     }
 
-    return { planned: toSubscribe, already, unresolved, subscribed, failed };
+    return { planned: all, already, unresolved, subscribed, failed };
   }
 
   const watchedCards = () => cards().filter((c) => {
@@ -450,33 +468,34 @@
       // Always resolve and report first: subscribing changes real account state,
       // so the user sees exactly which channels are affected before any write.
       status("🔍 Resolving channels…");
-      const plan = await subscribeToChannelsOf(ids, {
-        dryRun: true,
+      const plan = await subscribeToChannels({
+        videos: ids,
         progress: (d, t, label) => status(label + " " + d + "/" + t),
       });
 
-      const parts = [];
-      if (plan.planned.length) {
-        const names = plan.planned.slice(0, 8).map((c) => "  • " + (c.name || c.channelId));
-        if (plan.planned.length > 8) names.push("  • …and " + (plan.planned.length - 8) + " more");
-        parts.push("Subscribe to " + plan.planned.length + " new channel(s):\n" + names.join("\n"));
-      }
-      if (plan.already.length) parts.push("Already subscribed: " + plan.already.length);
-      if (plan.unresolved.length) parts.push("Could not resolve: " + plan.unresolved.length);
-
       if (!plan.planned.length) {
-        return status("Nothing new. " + (plan.already.length ? plan.already.length + " already subscribed." : "No channels resolved."));
+        return status(
+          "No channels resolved." + (plan.unresolved.length ? " " + plan.unresolved.length + " video(s) had no channel." : ""),
+        );
       }
+
+      const parts = [];
+      const names = plan.planned.slice(0, 8).map((c) => "  • " + (c.name || c.channelId));
+      if (plan.planned.length > 8) names.push("  • …and " + (plan.planned.length - 8) + " more");
+      parts.push("Subscribe to " + plan.planned.length + " channel(s):\n" + names.join("\n"));
+      if (plan.already.length) parts.push("Already subscribed (cached, still safe to re-send): " + plan.already.length);
+      if (plan.unresolved.length) parts.push("Could not resolve: " + plan.unresolved.length);
 
       if (settings.confirm && !confirm(parts.join("\n\n") + "\n\nProceed?")) return status("Cancelled.");
 
-      const result = await subscribeToChannelsOf(plan.planned.map((c) => c.channelId), {
+      const result = await subscribeToChannels({
+        channels: plan.planned,
         progress: (d, t, label) => status("⏳ " + label + " " + d + "/" + t),
       });
 
       const summary = ["✅ Subscribed to " + result.subscribed];
-      if (result.already.length) summary.push(result.already.length + " already subscribed");
-      if (result.failed.length) summary.push(result.failed.length + " failed");
+      if (result.failed.length) summary.push("⚠️ " + result.failed.length + " failed");
+      if (result.unresolved.length) summary.push(result.unresolved.length + " unresolved");
       status(summary.join(" · "));
     }));
     item("🔕", "Unsubscribe visible channels", async () => {
