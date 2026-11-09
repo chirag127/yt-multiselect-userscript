@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      3.1.1
+// @version      3.3.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -11,7 +11,9 @@
 // @supportURL   https://github.com/chirag127/yt-multiselect-userscript/issues
 // @downloadURL  https://github.com/chirag127/yt-multiselect-userscript/raw/main/yt-multiselect.user.js
 // @updateURL    https://github.com/chirag127/yt-multiselect-userscript/raw/main/yt-multiselect.user.js
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @noframes
 // @run-at       document-idle
 // ==/UserScript==
@@ -29,9 +31,21 @@
     reddit: "https://www.reddit.com/user/Far_Macaron_9910/",
   };
   const BATCH = 50, MAX_PAGES = 600;
-  const settings = Object.assign({ pos: "bottom-center", confirm: true },
-    JSON.parse(localStorage.getItem("ytms") || "{}"));
-  const saveSettings = () => localStorage.setItem("ytms", JSON.stringify(settings));
+  const YTMS_KEY = "ytms.settings";
+  function loadSettings() {
+    let raw = null;
+    try { raw = GM_getValue(YTMS_KEY, null); } catch (e) { raw = null; }
+    if (!raw) { try { raw = localStorage.getItem("ytms"); } catch (e) { raw = null; } }
+    let parsed = {};
+    try { parsed = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : {}; } catch (e) { parsed = {}; }
+    return Object.assign({ pos: "bottom-center", confirm: true }, parsed);
+  }
+  const settings = loadSettings();
+  const saveSettings = () => {
+    const payload = JSON.stringify(settings);
+    try { GM_setValue(YTMS_KEY, payload); } catch (e) { /* ignore */ }
+    try { localStorage.setItem("ytms", payload); } catch (e) { /* ignore */ }
+  };
 
   // ---------- InnerTube API (page's signed-in session) ----------
   const IT = {
@@ -529,41 +543,115 @@
       cards().forEach((card) => { const id = cardVideoId(card); const txt = (card.textContent || "").toLowerCase(); if (id && txt.includes(kw)) { selected.add(id); n++; } });
       refreshCbs(); updateBar(); status("✅ Selected " + n + " matching.");
     });
+    item("🧹", "Select unavailable / duplicates", () => {
+      const seen = new Set();
+      let n = 0;
+      cards().forEach((card) => {
+        const id = cardVideoId(card);
+        if (!id) return;
+        const txt = (card.textContent || "").trim();
+        const low = txt.toLowerCase();
+        const dead = low.startsWith("[deleted") || low.startsWith("[private") || low.startsWith("[unavailable");
+        const dup = seen.has(id);
+        seen.add(id);
+        if (dead || dup) { selected.add(id); n++; }
+      });
+      refreshCbs(); updateBar();
+      status(n ? "✅ Selected " + n + " unavailable/duplicate video(s)." : "Nothing unavailable or duplicated on this page.");
+    });
     item("📜", "Load entire page", () => loadEntirePage(status).then(() => status("✅ All loaded. " + loadedIds().length + " videos.")));
     item("📋", "Copy selected URLs", () => withSel(async (ids) => { await navigator.clipboard.writeText(ids.map((i) => "https://youtu.be/" + i).join("\n")); status("✅ Copied " + ids.length + " URLs."); }));
     item("💾", "Export selection (CSV)", () => withSel((ids) => { dl("selection.csv", "videoId,url\n" + ids.map((i) => i + ",https://youtu.be/" + i).join("\n"), "text/csv"); status("✅ Exported " + ids.length + "."); }));
     item("🧾", "Export selection (JSON)", () => withSel((ids) => { dl("selection.json", JSON.stringify(ids, null, 2), "application/json"); status("✅ Exported " + ids.length + "."); }));
-    item("⚙️", "Settings & about", openSettings);
+    item("⚙️", "Settings & about", showAbout);
     document.body.appendChild(menu);
   }
   function dl(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); URL.revokeObjectURL(a.href); }
 
-  function openSettings() {
-    const ov = document.createElement("div");
-    Object.assign(ov.style, { position: "fixed", inset: 0, zIndex: 100002, background: "rgba(0,0,0,.6)", display: "flex", alignItems: "center", justifyContent: "center" });
-    ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
-    const box = document.createElement("div");
-    Object.assign(box.style, { background: "#181818", color: "#fff", padding: "20px", borderRadius: "12px", width: "340px", font: "14px Roboto, Arial" });
-    const h3 = document.createElement("h3"); h3.textContent = "☑ Multiselect — Settings"; h3.style.margin = "0 0 12px"; box.appendChild(h3);
-    const posLabel = document.createElement("div"); posLabel.textContent = "Action bar position:"; posLabel.style.margin = "8px 0 4px"; box.appendChild(posLabel);
-    ["bottom-center", "bottom-left"].forEach((p) => {
-      const l = document.createElement("label"); l.style.display = "block"; l.style.cursor = "pointer";
-      const r = document.createElement("input"); r.type = "radio"; r.name = "ytmspos"; r.checked = settings.pos === p;
-      r.onchange = () => { settings.pos = p; saveSettings(); setPos(bar); };
-      l.appendChild(r); l.appendChild(document.createTextNode(" " + p)); box.appendChild(l);
-    });
-    const cl = document.createElement("label"); cl.style.display = "block"; cl.style.margin = "10px 0"; cl.style.cursor = "pointer";
-    const cc = document.createElement("input"); cc.type = "checkbox"; cc.checked = settings.confirm; cc.onchange = () => { settings.confirm = cc.checked; saveSettings(); };
-    cl.appendChild(cc); cl.appendChild(document.createTextNode(" Confirm before destructive actions")); box.appendChild(cl);
-    const about = document.createElement("div"); about.style.marginTop = "14px"; about.style.lineHeight = "2";
-    const ab = document.createElement("div"); ab.textContent = "About — by chirag127"; ab.style.fontWeight = "600"; about.appendChild(ab);
-    [["❤️ Donate", LINKS.donate], ["GitHub", LINKS.github], ["YouTube", LINKS.youtube], ["X", LINKS.x], ["LinkedIn", LINKS.linkedin], ["Instagram", LINKS.instagram], ["Reddit", LINKS.reddit]].forEach(([t, u], i) => {
-      if (i) about.appendChild(document.createTextNode(" · "));
-      const a = document.createElement("a"); a.href = u; a.target = "_blank"; a.textContent = t; a.style.color = "#3ea6ff"; a.style.textDecoration = "none"; about.appendChild(a);
-    });
-    box.appendChild(about);
-    const close = document.createElement("button"); close.textContent = "Close"; Object.assign(close.style, { marginTop: "14px", padding: "8px 14px", border: 0, borderRadius: "8px", background: "#065fd4", color: "#fff", cursor: "pointer" }); close.onclick = () => ov.remove();
-    box.appendChild(close); ov.appendChild(box); document.body.appendChild(ov);
+  // ---------- settings: context menu only ----------
+  // INVARIANT: no overlay, no modal, no floater. Settings live in the userscript
+  // manager's own menu (ScriptCat popup / extension right-click), each opening a
+  // native prompt or alert. The previous full-screen overlay is gone on purpose.
+
+  function refreshBar() {
+    try {
+      if (typeof bar !== "undefined" && bar) setPos(bar);
+    } catch (e) { /* bar not built yet */ }
+  }
+
+  function editPosition() {
+    const v = prompt(
+      "Action bar position: bottom-center or bottom-right\n\n"
+        + "bottom-left is reserved for the YouTube Toolkit script, so it is not offered here.",
+      settings.pos
+    );
+    if (v === null) return;
+    const p = String(v).trim().toLowerCase();
+    if (p !== "bottom-center" && p !== "bottom-right") {
+      alert('Position must be "bottom-center" or "bottom-right". Nothing changed.');
+      return;
+    }
+    settings.pos = p;
+    saveSettings();
+    refreshBar();
+    alert("Action bar position saved: " + p);
+  }
+
+  function toggleConfirm() {
+    settings.confirm = !settings.confirm;
+    saveSettings();
+    alert("Confirm before destructive actions: " + (settings.confirm ? "ON" : "OFF"));
+    refreshMenuLabels();
+  }
+
+  function showSetup() {
+    alert([
+      "YouTube Multiselect",
+      "",
+      "Action bar: " + settings.pos,
+      "Confirm before destructive actions: " + (settings.confirm ? "on" : "off"),
+      "",
+      "Settings are stored in the script manager and replicated across browsers",
+      "by ScriptCat's cloud sync. There is no in-page settings overlay.",
+    ].join("\n"));
+  }
+
+  function showAbout() {
+    alert([
+      "YouTube Multiselect (API) — by chirag127",
+      "",
+      "Settings are in the script manager menu, not on the page.",
+      "",
+      "Donate:   " + LINKS.donate,
+      "GitHub:   " + LINKS.github,
+      "YouTube:  " + LINKS.youtube,
+      "X:        " + LINKS.x,
+      "LinkedIn: " + LINKS.linkedin,
+      "Instagram:" + LINKS.instagram,
+      "Reddit:   " + LINKS.reddit,
+    ].join("\n"));
+  }
+
+  const MENU_IDS = {};
+
+  function menuCmd(name, fn, id) {
+    try {
+      if (id) GM_registerMenuCommand(name, fn, { id: id });
+      else GM_registerMenuCommand(name, fn);
+      if (id) MENU_IDS[id] = fn;
+    } catch (e) { /* manager without menu support */ }
+  }
+
+  function refreshMenuLabels() {
+    menuCmd("Confirm before destructive actions: " + (settings.confirm ? "ON" : "OFF"), toggleConfirm, "ytms-confirm");
+  }
+
+  function registerSettingsMenu() {
+    if (typeof GM_registerMenuCommand !== "function") return;
+    menuCmd("Settings: action bar position…", editPosition);
+    refreshMenuLabels();
+    menuCmd("Settings: show current setup", showSetup);
+    menuCmd("About & links", showAbout);
   }
 
   // ---------- activate / toggle ----------
@@ -583,6 +671,7 @@
     fab.onclick = () => setActive(true);
     document.body.appendChild(fab);
   }
+  registerSettingsMenu();
   mountFab();
   // Debounced observer: coalesce bursts of DOM mutations into one pass per frame
   // (running injectCbs on every mutation janked the page so scroll/clicks froze).
