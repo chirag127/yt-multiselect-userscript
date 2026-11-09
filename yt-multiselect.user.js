@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      3.3.0
+// @version      3.4.1
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -49,10 +49,14 @@
 
   // ---------- InnerTube API (page's signed-in session) ----------
   const IT = {
-    key: () => window.ytcfg && ytcfg.get("INNERTUBE_API_KEY"),
-    ctx: () => window.ytcfg && ytcfg.get("INNERTUBE_CONTEXT"),
+    // window.ytcfg is not always present when the script runs (SPA transition, early
+    // injection). Without a fallback every write went out as ?key=undefined and got a
+    // 400 that looked like a permissions error. Verified cause in the console.
+    key: () => (window.ytcfg && window.ytcfg.get("INNERTUBE_API_KEY")) || "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8",
+    ctx: () => (window.ytcfg && window.ytcfg.get("INNERTUBE_CONTEXT")) || { client: { clientName: "WEB", clientVersion: "2.20250101.00.00", hl: "en", gl: "US" } },
     async auth() {
       const s = (document.cookie.match(/(?:^|;\s*)(?:__Secure-3PAPISID|SAPISID)=([^;]+)/) || [])[1];
+      if (!s) throw new Error("Not signed in: no SAPISID cookie. Reload YouTube and sign in again.");
       const t = Math.floor(Date.now() / 1000);
       const b = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(t + " " + s + " " + location.origin));
       return "SAPISIDHASH " + t + "_" + [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -63,14 +67,42 @@
         headers: { "Content-Type": "application/json", "X-Origin": location.origin, Authorization: await this.auth() },
         body: JSON.stringify(Object.assign({ context: this.ctx() }, body)),
       });
-      if (!r.ok) throw new Error(ep + " HTTP " + r.status);
+      if (!r.ok) {
+        let detail = "";
+        try { detail = (await r.text()).replace(/\s+/g, " ").slice(0, 300); } catch (e) { detail = ""; }
+        const why = explainWriteStatus(r.status);
+        throw new Error(ep + " HTTP " + r.status + (why ? ". " + why : "") + (detail ? " Raw: " + detail : ""));
+      }
       return r.json();
     },
   };
+  /**
+   * YouTube answers 400 with "Sorry, something went wrong" (INVALID_ARGUMENT) for three
+   * very different mistakes. Reproduced live: bogus video id, nonexistent playlist id,
+   * and a playlist owned by someone else all return exactly that. Translate it.
+   */
+  function explainWriteStatus(status) {
+    if (status === 400) return "YouTube rejected it (400 INVALID_ARGUMENT). Most likely: the video id is invalid/deleted/private, the playlist id does not exist, or the playlist belongs to another account and cannot be edited.";
+    if (status === 401 || status === 403) return "Not authorised (" + status + "). Your YouTube session may have expired — reload YouTube and sign in again.";
+    if (status === 429) return "Rate limited (429). Wait a minute and retry with a smaller selection.";
+    return "";
+  }
   const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+  /** Accept a bare id, a VL-prefixed id, or a pasted URL. Returns null when unusable. */
+  function normPlaylistId(raw) {
+    let v = String(raw || "").trim();
+    const m = v.match(/[?&]list=([\w-]+)/);
+    if (m) v = m[1];
+    if (v.startsWith("VL")) v = v.slice(2);
+    return /^[\w-]{2,80}$/.test(v) ? v : null;
+  }
   async function editPlaylist(pid, actions, prog) {
+    const clean = normPlaylistId(pid);
+    if (!clean) throw new Error("Invalid playlist id: " + JSON.stringify(pid));
+    const usable = actions.filter((a) => a && (a.addedVideoId || a.removedVideoId));
+    if (!usable.length) throw new Error("No usable video ids in the request (empty or malformed selection).");
     let done = 0;
-    for (const part of chunk(actions, BATCH)) { await IT.call("browse/edit_playlist", { playlistId: pid, actions: part }); done += part.length; prog && prog(done, actions.length); }
+    for (const part of chunk(usable, BATCH)) { await IT.call("browse/edit_playlist", { playlistId: clean, actions: part }); done += part.length; prog && prog(done, usable.length); }
     return done;
   }
   const addTo = (pid, ids, p) => editPlaylist(pid, ids.map((id) => ({ action: "ACTION_ADD_VIDEO", addedVideoId: id })), p);
