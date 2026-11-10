@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      3.6.0
+// @version      3.7.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -64,7 +64,17 @@
     async call(ep, body) {
       const r = await fetch(location.origin + "/youtubei/v1/" + ep + "?key=" + this.key(), {
         method: "POST", credentials: "include",
-        headers: { "Content-Type": "application/json", "X-Origin": location.origin, Authorization: await this.auth() },
+        headers: Object.assign(
+          { "Content-Type": "application/json", "X-Origin": location.origin, Authorization: await this.auth() },
+          (function () {
+            const h = {};
+            const vis = window.ytcfg && ytcfg.get("VISITOR_DATA");
+            const cv = window.ytcfg && ytcfg.get("INNERTUBE_CLIENT_VERSION");
+            if (vis) h["X-Goog-Visitor-Id"] = vis;
+            if (cv) { h["X-Youtube-Client-Name"] = "1"; h["X-Youtube-Client-Version"] = cv; }
+            return h;
+          })()
+        ),
         body: JSON.stringify(Object.assign({ context: this.ctx() }, body)),
       });
       if (!r.ok) {
@@ -427,10 +437,10 @@
     if (settings.confirm && !confirm((on ? "Subscribe to " : "Unsubscribe from ") + ids.length + " channel(s)?")) return status("Cancelled.");
     let done = 0;
     try {
-      for (const part of chunk(ids, 50)) {
-        await IT.call(on ? "subscription/subscribe" : "subscription/unsubscribe", { channelIds: part });
-        done += part.length;
-        list.forEach(({ card, id }) => { if (part.includes(id)) card.style.opacity = on ? "" : ".35"; });
+      for (const id of ids) {
+        await IT.call(on ? "subscription/subscribe" : "subscription/unsubscribe", { channelIds: [id] });
+        done += 1;
+        list.forEach(({ card, id: cardId }) => { if (cardId === id) card.style.opacity = on ? "" : ".35"; });
         status((on ? "Subscribing " : "Unsubscribing ") + done + "/" + ids.length);
         if (done < ids.length) await sleep(jitter(220));
       }
