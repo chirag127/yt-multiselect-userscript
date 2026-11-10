@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Multiselect (API)
 // @namespace    https://github.com/chirag127
-// @version      3.5.0
+// @version      3.6.0
 // @description  Select videos with checkboxes on ANY YouTube page (search, playlist, subscriptions, channel, home) and bulk Save to Watch Later / playlist, queue, like, unlike, not interested, unsubscribe, hide watched, shift-range select, filter-select, export, copy, load entire page - powered by YouTube's InnerTube API. No per-video menu clicking.
 // @author       chirag127
 // @license      MIT
@@ -579,7 +579,6 @@
     item("✅", "Select all channels", selectAllChannels);
     item("🔕", "Unsubscribe SELECTED channels", () => withSel((ids) => changeChannelSubscriptions(false, ids), false, true));
     item("🔔", "Subscribe SELECTED channels", () => withSel((ids) => changeChannelSubscriptions(true, ids), false, true));
-    item("🔕", "Unsubscribe ALL visible channels (no selection)", () => changeChannelSubscriptions(false));
     item("🙈", "Hide watched cards", () => {
       const list = watchedCards();
       if (!list.length) return status("No watched cards on this page.");
@@ -617,7 +616,6 @@
     item("📋", "Copy selected URLs", () => withSel(async (ids) => { await navigator.clipboard.writeText(ids.map((i) => "https://youtu.be/" + i).join("\n")); status("✅ Copied " + ids.length + " URLs."); }));
     item("💾", "Export selection (CSV)", () => withSel((ids) => { dl("selection.csv", "videoId,url\n" + ids.map((i) => i + ",https://youtu.be/" + i).join("\n"), "text/csv"); status("✅ Exported " + ids.length + "."); }));
     item("🧾", "Export selection (JSON)", () => withSel((ids) => { dl("selection.json", JSON.stringify(ids, null, 2), "application/json"); status("✅ Exported " + ids.length + "."); }));
-    item("⚙️", "Settings & about", showAbout);
     document.body.appendChild(menu);
   }
   function dl(name, text, type) { const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); URL.revokeObjectURL(a.href); }
